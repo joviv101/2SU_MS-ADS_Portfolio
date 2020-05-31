@@ -1,0 +1,333 @@
+---
+title: 'Final Project'
+author: "Yoge Shrivistava, Jo Vivian, Michael O'Keefe"
+date: "`r Sys.time()`"
+output:
+  word_document: default
+  html_notebook: default
+---
+
+```{r setup, include=FALSE}
+############################################################################
+##Install packages                              
+############################################################################
+#install.packages("ggplot2")
+library(ggplot2)
+
+#install.packages("anytime")
+library(anytime)
+
+#install.packages('mctest')
+library(mctest)
+
+#install.packages('lmtest')
+library(lmtest)
+
+#install.packages('reshape2')
+library(reshape2)
+
+```
+
+
+### Step 1: Load Utility Functions
+
+```{r}
+############################################################################
+##Load Utility functions                              
+############################################################################
+Numberize <- function(inputVector){
+  # numerize removes comma,space and converts to numeric
+  print("inside Numberize()")
+  # Get rid of commas
+  inputVector<-gsub(",","", inputVector)
+  # Get rid of spaces
+  inputVector<-gsub(" ","", inputVector)
+  # Get rid of NA
+  inputVector<-gsub("NA","", inputVector)
+  inputVector<-gsub("NaN","", inputVector)
+  inputVector <- gsub("\\+", "", inputVector)
+  inputVector <- gsub("\\$", "", inputVector)
+  
+  print("exiting Numberize()")
+  return(as.numeric(inputVector))
+}
+
+Stringize <- function(inputVector){
+  # numerize removes comma,space and converts to numeric
+  print("inside Stringize()")
+  
+  print("exiting Stringize()")
+  return(as.character(inputVector))
+}
+
+Text_Num <- function(x){
+  if (grepl("M", x, ignore.case = TRUE)) {
+    as.numeric(gsub("M", "", x, ignore.case = TRUE)) * 1000000
+  } else if (grepl("k", x, ignore.case = TRUE)) {
+    as.numeric(gsub("k", "", x, ignore.case = TRUE)) * 1000
+  } else {
+    as.numeric(x)
+  }
+}
+
+```
+
+### Step 2: Clean the data
+
+ 
+```{r}
+
+############################################################################
+##Load Data Munging and other project function                              
+############################################################################
+cleanup <- function(inputDataFrame){
+# deleting junk / incorrect records
+  inputDataFrame <- inputDataFrame[-(which(inputDataFrame$App=="Life Made WI-Fi Touchscreen Photo Frame")),]
+
+#remove unwanted columns
+  inputDataFrame <- inputDataFrame[,-10]
+
+#Convert Installs to Numeric
+  inputDataFrame$Installs <- Numberize(inputDataFrame$Installs)
+
+#Convert Type to String
+  inputDataFrame$Type <- Stringize(inputDataFrame$Type)
+
+#cleanup size
+#convert M to millions and K to thousand in Size column
+
+#inputDataFrame$Size <- gsub("\\+", "", inputDataFrame$Size)
+
+#convert M to millions and k to thousands in Size column, and convert to numeric
+inputDataFrame$Size <- gsub("M","e06",inputDataFrame$Size)  
+inputDataFrame$Size <- gsub("k","e03",inputDataFrame$Size)  
+
+#Change Varies with device to N/A
+#length(inputDataFrame$Size[ProjectData$Size=="Varies with device"]) <-NA
+
+
+#Convert size to numeric
+inputDataFrame$Size <- Numberize(inputDataFrame$Size)
+
+#Convert Rating to numeric
+inputDataFrame$Rating <- Numberize(inputDataFrame$Rating)
+
+
+#Convert Reviews to numeric
+inputDataFrame$Reviews <- Numberize(inputDataFrame$Reviews)
+
+#Remove dollar signs from Price column and convert it to  convert to numeric
+inputDataFrame$Price <- Numberize(inputDataFrame$Price)
+
+
+#Convert Last Updated column to dates
+#install.packages("anytime")
+#library(anytime)
+#install above library for anydate
+
+#EnsurePackage('anytime')
+inputDataFrame$Last.Updated <- anydate(inputDataFrame$Last.Updated)
+
+#Remove dollar signs from Price column and convert it to  convert to numeric
+inputDataFrame$Price <- Numberize(inputDataFrame$Price)
+
+#Replace "Varies with device" with NA in the Android Version column
+inputDataFrame$Android.Ver[inputDataFrame$Android.Ver=="Varies with device"] <-NA
+return(inputDataFrame)
+
+} ##end of cleanup
+```
+
+
+###  Step 3: Begin Analysis Functions
+
+
+
+```{r}
+f_analysis_slides_JO_VIVAN <- function() {
+  NewDF <- ProjectData[, -1:-2]
+  NewDF <- NewDF[, -5]
+  NewDF <- NewDF[, -6:-10]
+  DFLong<-melt(NewDF, id=c("Installs"))
+  ProjLine<-ggplot(DFLong, aes(x=Installs, y=DFLong$value, color=DFLong$variable))+geom_line()
+  ProjLine
+  
+  #run multi-variate linear regression
+  slide1_lm<-lm(Installs~Price+Rating+Size+Reviews, data=ProjectData)
+  
+  #Linear Regression indicates some possible collinearity. Run test to determine
+  X <- ProjectData[, 3:6]
+  Y <- X + ProjectData[, 8]
+  omcdiag(x = Y, y = ProjectData$Rating )
+  
+  #drop Reviews and re-run linear regression
+  slide1_lm2<-lm(Installs~Price+Size+Rating, data=ProjectData)
+  
+  #still, R2 is very low. Likely this data doesn't fit a linear model. Run a Ramsey test to determine
+  resettest(Installs ~ Price + Rating + Size, power=2:3, type="regressor", data=ProjectData)
+  
+  #Ramsey test positive - solution = transform data
+  dftrans <- ProjectData
+  dftrans$Rating <- sqrt(dftrans$Rating)
+  dftrans$Reviews <- sqrt(dftrans$Reviews)
+  dftrans$Size <- sqrt(dftrans$Size)
+  dftrans$Installs <- sqrt(dftrans$Installs)
+  dftrans$Price <- sqrt(dftrans$Price)
+  
+  slide1_lmtrans <- lm(Installs~Price+Size+Rating, data=dftrans)
+  slide1_lmtrans
+  
+  #compare number of installs against the category type
+  Slide2<-ggplot(ProjectData, aes(x=Category, y=Installs))+geom_col(fill = 'orchid')+theme(axis.text.x=element_text(angle=90, hjust=1))+ggtitle('Category vs Installs')+theme(plot.title = element_text(hjust = 0.5))
+  
+  #compare number of installs against the rating
+  slide4<-ggplot(ProjectData, aes(x=Rating, y=Installs))+geom_col(fill='turquoise')+ggtitle('Ratings vs Installs')+theme(plot.title = element_text(hjust = 0.5))
+  
+  #why are the installs going down after 4.3?
+  #First the average Rating
+  mean(ProjectData$Rating, na.rm = TRUE)
+  #Now see what percentage of apps are rated as high as a 5
+  FiveRating <- which(ProjectData$Rating == 5)
+  PercentFiveRating <- (length(FiveRating)/length(ProjectData$Rating))*100
+  
+  #compare number of installs to content rating
+  notmyslide <- ggplot(ProjectData, aes(x=Content.Rating, y=Installs))+geom_col(fill = 'red')+theme(axis.text.x=element_text(angle=90, hjust=1))+ggtitle('Content Rating vs Installs')+theme(plot.title = element_text(hjust = 0.5))
+  
+  
+}
+
+f_analysis_slides_MICHAEL <- function(){
+  
+  #Number of Reviews vs. Number of Installs
+  myLinMod <- lm(formula=google.play$Reviews ~ google.play$Installs, data = google.play)
+  summary(myLinMod)
+  cor.test(google.play$Reviews,google.play$Installs)
+  cor.test
+  
+  #Number of Installs vs. Date of Last Update
+  as.Date(google.play$Last.Updated, "%d-%b-%y")
+  plot(google.play$Last.Updated,log(google.play$Installs),col = "blue",pch = 20,cex=0.8)
+  google.play$Installs <- log10(google.play$Installs)
+  lm(formula = google.play$Last.Updated ~ log(google.play$Installs))
+
+  
+    
+}
+
+f_analysis_slides_BRETT <- function() {
+  f_install_vs_size()
+  f_install_vs_size_line()
+  f_install_vs_genre()
+  
+}
+
+f_analysis_slides_YOGENDRA <- function() {
+  f_install_vs_genre_free_apps()
+  f_install_vs_genre_paid()
+  
+}
+
+
+f_install_vs_genre_free_apps <- function (){
+  ProjectData$Installs_Million <- ProjectData$Installs/1000000
+  install_cat <- ProjectData[which(ProjectData$Type =="Free" & ProjectData$Installs_Million !=0),]
+  install_cat <- tapply(ProjectData$Installs_Million, ProjectData$Category,sum)
+  df <- do.call(rbind, lapply(install_cat, as.data.frame))
+  df$Genre <-rownames(df)
+  colnames(df) <- c("Installs_Million","Genre")
+  df <- df[complete.cases(df),]
+  df <- df[order(-df$Installs_Million),]
+  df$Genre <- factor(df$Genre, levels = df$Genre[order(df$Installs_Million)])
+  
+  genre_install <-ggplot(df, aes(x=Genre, y=Installs_Million))+geom_col()+theme(axis.text.x=element_text(angle=90, hjust=1))+ggtitle('Genre vs Installs(Free Apps)')+theme(plot.title = element_text(hjust = 0.5))
+  genre_install
+}
+
+f_install_vs_genre_paid <- function (){
+  
+  ProjectData$Installs_Million <- ProjectData$Installs/1000000
+  df_paid_genre <- ProjectData[which(ProjectData$Type !="Free" & ProjectData$Installs_Million !=0),]
+  #df_paid_genre <- df_paid_genre[complete.cases(df),]
+  install_cat_paid <- tapply(df_paid_genre$Installs_Million, df_paid_genre$Category,sum)
+  df <- do.call(rbind, lapply(install_cat_paid, as.data.frame))
+  
+  df$Genre <-rownames(df)
+  colnames(df) <- c("Installs_Million","Genre")
+  df <- df[complete.cases(df),]
+  df <- df[order(-df$Installs_Million),]
+  
+  df$Genre <- factor(df$Genre, levels = df$Genre[order(df$Installs_Million)])
+  
+  genre_install <- ggplot(df, aes(x=Genre, y=Installs_Million))+geom_col()+theme(axis.text.x=element_text(angle=90, hjust=1))+ggtitle('Genre vs Installs(Paid Apps)')+theme(plot.title = element_text(hjust = 0.5))
+  genre_install
+}
+
+f_install_vs_size <- function(variables) {
+  
+  library(ggplot2)
+  ProjectData$Size_MB <- ProjectData$Size/1000000
+  ProjectData$Installs_Million <- ProjectData$Installs/1000000
+  #plot(df$Size_MB,df$Installs_Million)
+  g1 <- ggplot(ProjectData,aes(x=Size_MB)) + geom_histogram(binwidth = 10,color="black",fill="lightyellow")
+  g1 <- g1 + ylab("No of Apps") + xlab("Size (MB)") + ggtitle("No of Apps vs Size") +  theme(plot.title = element_text(hjust = 0.5))
+  g1
+  
+  g2 <- ggplot(ProjectData,aes(x=Size_MB,y=Installs_Million)) + geom_bar(stat="identity")
+  g2 <- g2 + ylab("Installs (Million)") + xlab("Size (MB)") + ggtitle("App Installs vs Size") +  theme(plot.title = element_text(hjust = 0.5))
+  g2
+}
+
+f_install_vs_size_line <- function(variables) {
+  df_xy1 <- data.frame(ProjectData$Size_MB,ProjectData$Installs_Million)
+  df_xy2 <- df_xy1[complete.cases(df_xy1),]
+  df_xy3 <- df_xy2[order(df_xy2$ProjectData.Size_MB),]
+  
+  g6 <- ggplot(df_xy3,aes(x=Size_MB)) + geom_line(aes(y=Installs_Million))
+  
+  str(df_xy3)
+  
+  rownames(df_xy3) <- NULL
+  
+  df_xy31 <- df_xy3[c(1:50),]
+  str(df_xy31)
+  g6 <- ggplot(df_xy31,aes(x=ProjectData.Size_MB)) + geom_point(aes(y=ProjectData.Installs_Million))
+  g6
+  
+}
+
+f_install_vs_genre <- function(variables) {
+  df_paid_genre <- ProjectData[which(ProjectData$Type !="Free" & ProjectData$Installs !=0),]
+  df_paid_genre_sorted <- df_paid_genre[order(-df_paid_genre$Installs),]
+  Slide_brett <-ggplot(df_paid_genre_sorted, aes(x=Category, y=Installs))+geom_col()+theme(axis.text.x=element_text(angle=90, hjust=1))+ggtitle('Genre vs Installs')+theme(plot.title = element_text(hjust = 0.5))
+  
+}
+
+
+```
+
+###  Step 4: Main Function
+
+
+```{r}
+
+############################################################################
+## Main function                               
+############################################################################
+data_from_file <- read.csv(file = 'C:/Users/joviv/programsjov/googleplaystore.csv', header = TRUE, sep = ',')
+
+# clean up the dataset
+ProjectData <- cleanup(data_from_file)
+
+# Analysis and Slide work by JO
+f_analysis_slides_JO_VIVAN()
+
+# Analysis and Slide work by Michael
+f_analysis_slides_MICHAEL()
+
+# Analysis and Slide work by Brett
+f_analysis_slides_BRETT()
+
+# Analysis and Slide work by Yogendra
+f_analysis_slides_YOGENDRA()
+```
+ 
